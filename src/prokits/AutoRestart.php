@@ -12,6 +12,7 @@ use pocketmine\scheduler\Task;
 use pocketmine\Server;
 use pocketmine\utils\Config;
 use pocketmine\utils\TextFormat;
+use pocketmine\utils\Utils;
 use prokits\events\PreRestartEvent;
 use SplFileObject;
 
@@ -30,16 +31,16 @@ final class AutoRestart extends PluginBase {
 		self::$instance = $this;
 		$this->getLogger()->info('AutoRestart Plugin Loaded');
 		$this->settings = new Config($this->getDataFolder() . '/config.yml' , Config::YAML , [
-			'autoRestartTime' => 15 ,
+			'autoRestartTime' => 60 ,
 		]);
 		$this->getScheduler()->scheduleRepeatingTask(new class extends Task {
 			protected $tick = 0;
 			
 			public function onRun(int $currentTick) {
 				$autoRestartTime = AutoRestart::getInstance()->getSettings()->get('autoRestartTime');
-				$delay = $this->tick - $autoRestartTime;
-				if($delay <= 10) {
-					Server::getInstance()->broadcastMessage('§r[§bAutoRestart§r] >> Server will restart in §e' . ($autoRestartTime - $this->tick) . ' §rMinutes');
+				$delay = $autoRestartTime - $this->tick;
+				if($delay < 16) {
+					Server::getInstance()->broadcastMessage('§r[§bAutoRestart§r] >> Server will restart in §e' . $delay . ' §rSecond');
 				}
 				if($autoRestartTime === $this->tick) {
 					AutoRestart::getInstance()->restart(0);
@@ -142,7 +143,10 @@ final class AutoRestart extends PluginBase {
 		$setting = $this->getSettings();
 		register_shutdown_function(function() use ($setting) {
 			if($setting->exists('file')) {
-				pcntl_exec($setting->get('file'));
+				if(Utils::getOS() !== Utils::OS_WINDOWS) {
+					@system('chmod +x ' . $setting->get('file'));
+				}
+				@pcntl_exec($setting->get('file'));
 			}
 		});
 		$this->getScheduler()->scheduleDelayedTask(new class extends Task {
