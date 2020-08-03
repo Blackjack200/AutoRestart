@@ -6,6 +6,7 @@ namespace prokits;
 
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
+use pocketmine\level\utils\SubChunkIteratorManager;
 use pocketmine\plugin\PluginBase;
 use pocketmine\scheduler\Task;
 use pocketmine\Server;
@@ -29,21 +30,23 @@ final class AutoRestart extends PluginBase {
 		self::$instance = $this;
 		$this->getLogger()->info('AutoRestart Plugin Loaded');
 		$this->settings = new Config($this->getDataFolder() . '/config.yml' , Config::YAML , [
-			'autoRestartTime' => 60 ,
+			'autoRestartTime' => 15 ,
 		]);
 		$this->getScheduler()->scheduleRepeatingTask(new class extends Task {
 			protected $tick = 0;
 			
 			public function onRun(int $currentTick) {
-				if($this->tick - AutoRestart::getInstance()->getSettings()->get('autoRestartTime') <= 10) {
-					Server::getInstance()->broadcastMessage('§r[§bAutoRestart§r] >> Server will restart in §e' . $this->tick - AutoRestart::getInstance()->getSettings()->get('autoRestartTime') . ' §rMinutes');
+				$autoRestartTime = AutoRestart::getInstance()->getSettings()->get('autoRestartTime');
+				$delay = $this->tick - $autoRestartTime;
+				if($delay <= 10) {
+					Server::getInstance()->broadcastMessage('§r[§bAutoRestart§r] >> Server will restart in §e' . ($autoRestartTime - $this->tick) . ' §rMinutes');
 				}
-				if(AutoRestart::getInstance()->getSettings()->get('autoRestartTime') === $this->tick) {
+				if($autoRestartTime === $this->tick) {
 					AutoRestart::getInstance()->restart(0);
 				}
 				$this->tick++;
 			}
-		} , 20 * 60);
+		} , 20);
 	}
 	
 	public function onDisable() {
@@ -61,53 +64,67 @@ final class AutoRestart extends PluginBase {
 	}
 	
 	public function onCommand(CommandSender $sender , Command $command , string $label , array $args) : bool {
-		if(mb_strtolower($label) === 'restart') {
-			if(isset($args[0])) {
-				switch(mb_strtolower($args[0])) {
-					case 'n':
-					case 'now':
-						$this->restart(0);
-						break;
-					case 't':
-					case 'time':
-						if(!isset($args[1])) {
-							$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
-							return true;
-						}
-						$this->restart((int) $args[1]);
-						break;
-					case 'p':
-					case 'path':
-						if(!isset($args[1])) {
-							$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
-							return true;
-						}
-						$pathContainer = new TextContainer([
-							'SERVER_PATH' => $this->getServer()->getDataPath() ,
-						]);
-						$path = $pathContainer->getText($args[1]);
-						
-						if(!file_exists($args[1])) {
-							$sender->sendMessage(TextFormat::RED . "File not found $path.");
-							return true;
-						}
-						
-						$file = new SplFileObject($path);
-						if(!$file->isReadable()) {
-							$sender->sendMessage(TextFormat::RED . "Cannot Read File $path.");
-							return true;
-						}
-						
-						$this->settings->set('file' , $path);
-						$sender->sendMessage(TextFormat::GREEN . "Set Script path to $path");
-						break;
-					case 'c':
-					case 'cancel':
-						$sender->sendMessage(TextFormat::GOLD . 'TODO');
-						break;
+		if($sender->isOp()) {
+			if(mb_strtolower($label) === 'restart') {
+				if(isset($args[0])) {
+					switch(mb_strtolower($args[0])) {
+						case 'n':
+						case 'now':
+							$this->restart(0);
+							break;
+						case 't':
+						case 'time':
+							if(!isset($args[1])) {
+								$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
+								return true;
+							}
+							$this->restart((int) $args[1]);
+							break;
+						case 'st':
+						case 'settime':
+							if(!isset($args[1])) {
+								$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
+								return true;
+							}
+							if($args[1] < 1) {
+								$sender->sendMessage(TextFormat::RED . 'Invalid Time.');
+								return true;
+							}
+							$this->settings->set('autoRestartTime' , (int) $args[1]);
+							break;
+						case 'p':
+						case 'path':
+							if(!isset($args[1])) {
+								$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
+								return true;
+							}
+							$pathContainer = new TextContainer([
+								'SERVER_PATH' => $this->getServer()->getDataPath() ,
+							]);
+							$path = $pathContainer->getText($args[1]);
+							
+							if(!file_exists($path)) {
+								$sender->sendMessage(TextFormat::RED . "File not found $path.");
+								return true;
+							}
+							
+							$file = new SplFileObject($path);
+							if(!$file->isReadable()) {
+								$sender->sendMessage(TextFormat::RED . "Cannot Read File $path.");
+								return true;
+							}
+							
+							$this->settings->set('file' , $path);
+							$sender->sendMessage(TextFormat::GREEN . "Set Script path to $path");
+							break;
+						case 'c':
+						case 'cancel':
+							$sender->sendMessage(TextFormat::GOLD . 'TODO');
+							break;
+					}
+				} else {
+					$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
 				}
-			} else {
-				$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
 			}
 		}
 		return true;

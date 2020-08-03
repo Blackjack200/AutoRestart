@@ -14,9 +14,9 @@ class TextContainer {
 	
 	public function getText(string $text) : ?string {
 		foreach($this->var as $name => $value) {
-			$text = str_replace(sprintf('%%s%' , $name) , $value , $text);
+			echo sprintf('%%s%' , $name) , PHP_EOL;
+			$text = str_replace("%$name%" , $value , $text);
 		}
 		return $text;
 	}
-	
 }
