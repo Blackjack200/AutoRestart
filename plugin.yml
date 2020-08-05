@@ -1,6 +1,6 @@
 name: AutoRestart
 main: prokits\AutoRestart
-version: 0.0.2
+version: 1.0.0
 api: 3.3.3
 author: Misaka
 commands:

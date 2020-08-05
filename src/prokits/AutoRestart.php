@@ -1,12 +1,12 @@
 <?php
 
+//we know that this code is foolish :(
 
 namespace prokits;
 
-
+use LogicException;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
-use pocketmine\level\utils\SubChunkIteratorManager;
 use pocketmine\plugin\PluginBase;
 use pocketmine\scheduler\Task;
 use pocketmine\Server;
@@ -14,6 +14,7 @@ use pocketmine\utils\Config;
 use pocketmine\utils\TextFormat;
 use pocketmine\utils\Utils;
 use prokits\events\PreRestartEvent;
+use RuntimeException;
 use SplFileObject;
 
 final class AutoRestart extends PluginBase {
@@ -21,6 +22,9 @@ final class AutoRestart extends PluginBase {
 	/** @var \pocketmine\utils\Config */
 	private $settings;
 	private $loadTime;
+	private $unixShell = null;
+	/** @var Task */
+	private $task;
 	
 	public static function getInstance() : ?self {
 		return self::$instance;
@@ -30,11 +34,22 @@ final class AutoRestart extends PluginBase {
 		$this->loadTime = time();
 		self::$instance = $this;
 		$this->getLogger()->info('AutoRestart Plugin Loaded');
+		
 		$this->settings = new Config($this->getDataFolder() . '/config.yml' , Config::YAML , [
 			'autoRestartTime' => 60 ,
 		]);
-		$this->getScheduler()->scheduleRepeatingTask(new class extends Task {
-			protected $tick = 0;
+		
+		if(Utils::getOS() !== Utils::OS_UNKNOWN && Utils::getOS() !== Utils::OS_WINDOWS) {
+			$execute = trim(shell_exec('which bash') ?? shell_exec('which zsh') ?? shell_exec('which sh') ?? shell_exec('which ksh') ?? shell_exec('which csh') ?? shell_exec('which tcsh') ?? shell_exec('which dash'));
+			if(!empty($execute)) {
+				$this->getLogger()->alert('We Will use ' . $execute . ' to run scripts');
+				$this->unixShell = $execute;
+			}
+		}
+		
+		$this->task = new class extends Task {
+			
+			public $tick = 0;
 			
 			public function onRun(int $currentTick) {
 				$autoRestartTime = AutoRestart::getInstance()->getSettings()->get('autoRestartTime');
@@ -47,14 +62,15 @@ final class AutoRestart extends PluginBase {
 				}
 				$this->tick++;
 			}
-		} , 20);
+		};
+		
+		$this->getScheduler()->scheduleRepeatingTask($this->task , 20);
 	}
 	
 	public function onDisable() {
 		$this->getLogger()->info('AutoRestart Plugin Loaded');
 		$this->settings->save();
 	}
-	
 	
 	public function restart(int $delay) {
 		$event = new PreRestartEvent();
@@ -69,20 +85,20 @@ final class AutoRestart extends PluginBase {
 			if(mb_strtolower($label) === 'restart') {
 				if(isset($args[0])) {
 					switch(mb_strtolower($args[0])) {
-						case 'n':
-						case 'now':
-							$this->restart(0);
-							break;
-						case 't':
-						case 'time':
+						case '-t':
+						case '--time':
 							if(!isset($args[1])) {
 								$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
 								return true;
 							}
+							if($args[1] === 'n' || $args[1] === 'now') {
+								$this->restart(0);
+								return true;
+							}
 							$this->restart((int) $args[1]);
 							break;
-						case 'st':
-						case 'settime':
+						case '-st':
+						case '--setTime':
 							if(!isset($args[1])) {
 								$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
 								return true;
@@ -92,34 +108,34 @@ final class AutoRestart extends PluginBase {
 								return true;
 							}
 							$this->settings->set('autoRestartTime' , (int) $args[1]);
+							$this->task->tick = 0;
 							break;
-						case 'p':
-						case 'path':
+						case '-p':
+						case '--path':
 							if(!isset($args[1])) {
 								$sender->sendMessage(TextFormat::RED . 'Syntax Error in Args.');
 								return true;
 							}
 							$pathContainer = new TextContainer([
-								'SERVER_PATH' => $this->getServer()->getDataPath() ,
+								'SP' => $this->getServer()->getDataPath() ,
 							]);
 							$path = $pathContainer->getText($args[1]);
-							
-							if(!file_exists($path)) {
-								$sender->sendMessage(TextFormat::RED . "File not found $path.");
+							try {
+								$file = new SplFileObject($path);
+							} catch(RuntimeException $runtimeException) {
+								$sender->sendMessage(TextFormat::RED . "File $path cannot open.");
+								return true;
+							} catch(LogicException $logicException) {
+								$sender->sendMessage(TextFormat::RED . "$path is a directory.");
 								return true;
 							}
-							
-							$file = new SplFileObject($path);
-							if(!$file->isReadable()) {
-								$sender->sendMessage(TextFormat::RED . "Cannot Read File $path.");
-								return true;
+							if(isset($file)) {
+								$this->settings->set('file' , $path);
+								$sender->sendMessage(TextFormat::GREEN . "Set Script path to $path");
 							}
-							
-							$this->settings->set('file' , $path);
-							$sender->sendMessage(TextFormat::GREEN . "Set Script path to $path");
 							break;
-						case 'c':
-						case 'cancel':
+						case '-c':
+						case '--cancel':
 							$sender->sendMessage(TextFormat::GOLD . 'TODO');
 							break;
 					}
@@ -141,12 +157,14 @@ final class AutoRestart extends PluginBase {
 	
 	private function actuallyRestart(int $delay) {
 		$setting = $this->getSettings();
-		register_shutdown_function(function() use ($setting) {
-			if($setting->exists('file')) {
-				if(Utils::getOS() !== Utils::OS_WINDOWS) {
-					@system('chmod +x ' . $setting->get('file'));
+		$shell = $this->unixShell;
+		register_shutdown_function(function() use ($setting , $shell) {
+			if($setting->exists('file') && file_exists($setting->get('file'))) {
+				if($shell !== null) {
+					pcntl_exec($shell , [$setting->get('file')]);
+					return;
 				}
-				@pcntl_exec($setting->get('file'));
+				pcntl_exec($setting->get('file'));
 			}
 		});
 		$this->getScheduler()->scheduleDelayedTask(new class extends Task {
